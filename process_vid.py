@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import json
 import os
+import time
 
 #https://stackoverflow.com/questions/66993242/make-faster-videocapture-opencv
 #https://github.com/Jan-9C/deathcounter_ocr/blob/main/deathcounter.py
@@ -10,7 +11,7 @@ import os
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-debug_mode = config['debug_mode']
+debug_mode = (str.lower(config['debug_mode']) == "true") or (str.lower(config['debug_mode']) == "enabled")
 
 refresh_time = float(config['refresh_time'])
 refresh_time_death = float(config['refresh_time_death'])
@@ -23,7 +24,8 @@ upper_red2 = (180, 255, 255)
 def check_frame_for_death(image, game_type):
     is_death = False
 
-    # start = time.time()
+    if debug_mode:
+        start = time.time()
     # __red color mask__
     # __DARK SOULS 1, 2, 3__ __DEMONS SOULS REMAKE__ __SEKIRO SHADOW DIE TWICE__
     # img_ori = cv2.cvtColor(np.array(ImageGrab.grab()), cv2.COLOR_BGRA2RGB)
@@ -101,8 +103,10 @@ def check_frame_for_death(image, game_type):
         avg = int(contour_y_sum / len(contour_array))
     except ZeroDivisionError:
         avg = 0
-    # print("len contour_array : ", len(contour_array))
-    # print("contour_array : ", contour_array)
+    
+    if debug_mode:
+        print("len contour_array : ", len(contour_array))
+        print("contour_array : ", contour_array)
     for i in range(len(contour_array)):
         # print("i : ", i)
         # __ (average - contour_y position) < 50 ? bluebox.append : next
@@ -111,19 +115,22 @@ def check_frame_for_death(image, game_type):
             sub *= -1
         if sub < 50 * h_rate:
             blue_box.append(contour_array[i])
-            # __debug : check bounding box
-            # cv2.rectangle(
-            #     img_result,
-            #     (contour_array[i][0], contour_array[i][1]),
-            #     (contour_array[i][0] + contour_array[i][2], contour_array[i][1] + contour_array[i][3]),
-            #     (255, 0, 0), 2)
+            if debug_mode:
+                cv2.rectangle(
+                    img_result,
+                    (contour_array[i][0], contour_array[i][1]),
+                    (contour_array[i][0] + contour_array[i][2], contour_array[i][1] + contour_array[i][3]),
+                    (255, 0, 0), 2)
         # ### Find the distance [D] between contours & the vertical ratio of the contours must be constant.
     if len(blue_box) >= 2:  # ##if len(centers) >= 2: if len(contour_array) >= 2:
         for idx in range(len(blue_box) - 1):
             dx = blue_box[idx][0] - blue_box[idx + 1][0]
             dy = blue_box[idx][1] - blue_box[idx + 1][1]
             D.append(int(np.sqrt(dx * dx + dy * dy)))
-    # print("D : ", D)
+    
+    if debug_mode:
+        print("D : ", D)
+
     for i in range(len(D)):
         if game_type == "souls" and D[i] < 160 * w_rate: # __ souls
             fX.append(D[i])
@@ -131,40 +138,36 @@ def check_frame_for_death(image, game_type):
             fX.append(D[i])
         elif game_type == "ring" and D[i] < 50 * w_rate * 2:
             fX.append(D[i])
-    # print(fX)
-    if game_type == "souls" and 5 < len(fX) < 9: # __ souls
+
+    if debug_mode:
+        print(fX)
+
+    if game_type == "souls" and 5 < len(fX) < 9:
         is_death = True
-    elif game_type == "sekiro" and len(fX) == 1: # __ sekiro
+    elif game_type == "sekiro" and len(fX) == 1:
         is_death = True
-    elif game_type == "ring" and 5 < len(fX) < 9: # __ elden ring
+    elif game_type == "ring" and 5 < len(fX) < 9:
         is_death = True
     contour_array.clear()
     blue_box.clear()
     D.clear()
     fX.clear()
-    # print("FPS : {:.2f}".format(1 / (time.time() - start)))
-
-    # __OCR test__
-    # text_img = pytesseract.image_to_string(img_result, lang='eng')
-    # print(text_img)
-    # __debug only__
-    # img_resize = cv2.resize(img_result, dsize=(0, 0), fx=0.5, fy=0.5)
-    # cv2.imshow("capture", img_resize)
-    # cv2.waitKey(1)
-    # if key == 0:
-    #     cv2.destroyAllWindows()
-    #     break
+    
+    if debug_mode:
+        print(f'Processing : {round(1 / (time.time() - start), 2)} frames per seconds')
 
     return is_death
 
 def add_death(timestamp):
-    print(f'Death at {timestamp}')
+    print(f'-------------Death at {timestamp}-------------')
 
 def process(target_video_file, game_type):
     video = cv2.VideoCapture(target_video_file)
     video_fps = video.get(cv2.CAP_PROP_FPS)
+    video_total_frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
     next_needed_frame_no = 0
     current_frame_no = 0
+    start_time = time.time()
 
     while video.isOpened():
         is_death = False
@@ -181,13 +184,18 @@ def process(target_video_file, game_type):
                 next_needed_frame_no = current_frame_no + refresh_time_death*video_fps
             else:
                 next_needed_frame_no = current_frame_no + refresh_time*video_fps
-                print(f'No death found at {str(video.get(cv2.CAP_PROP_POS_MSEC))}')
         else:
             current_frame_no+=1
         
         if cv2.waitKey(10) & 0XFF == ord('q'):
             break
+        
+        if (current_frame_no % 30 == 0):
+            fps = current_frame_no/(time.time() - start_time)
+            if fps == 0:
+                fps = 1
+            print(f'Processing at {round(fps, 2)} frames per seconds. \nTime remaining : {round(((video_total_frames - current_frame_no) / fps), 2)} seconds')
 
     video.release()
 
-process('toprocess.webm', 'ring')
+#process('toprocess.webm', 'ring')

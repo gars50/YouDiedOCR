@@ -5,7 +5,8 @@ import json
 
 with open('config.json', 'r') as f:
     config = json.load(f)
-debug_mode = config['debug_mode']
+debug_mode = (str.lower(config['debug_mode']) == "true") or (str.lower(config['debug_mode']) == "enabled")
+
 if debug_mode:
     #Ensure folders are in place
     if not os.path.exists("debug_images"):
