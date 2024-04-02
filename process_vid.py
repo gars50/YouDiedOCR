@@ -1,4 +1,3 @@
-import pytesseract
 import cv2
 import numpy as np
 import json
@@ -11,179 +10,157 @@ import os
 with open('config.json', 'r') as f:
     config = json.load(f)
 
-with open(config["crop_file"], 'r') as f:
-    crop = json.load(f)
-
-with open(config["mask_file"]) as f:
-    mask_file = json.load(f)
-
-tesseract_directory_path = config['tesseract_directory']
 debug_mode = config['debug_mode']
+
 refresh_time = float(config['refresh_time'])
-refresh_time_death = int(config['refresh_time_death'])
-ocr_string = config["ocr_string"]
-language = config["language"]
-levenshtein_d = int(config["levensthein_d"])
+refresh_time_death = float(config['refresh_time_death'])
 
-# Set tesseract path to exe
-pytesseract.pytesseract.tesseract_cmd = os.path.join(tesseract_directory_path, "tesseract.exe")
+lower_red1 = (0, 67, 80)
+upper_red1 = (5, 255, 255)
+lower_red2 = (170, 67, 80)
+upper_red2 = (180, 255, 255)
 
-# Function to generate levensthein distance between two Strings
-# in other words it returns how much the strings differ
-def levenshtein(s1, s2):
-    m, n = len(s1), len(s2)
-    d = [[0] * (n + 1) for _ in range(m + 1)]
-    for i in range(m + 1):
-        d[i][0] = i
-    for j in range(n + 1):
-        d[0][j] = j
-    for j in range(1, n + 1):
-        for i in range(1, m + 1):
-            if s1[i - 1] == s2[j - 1]:
-                d[i][j] = d[i - 1][j - 1]
-            else:
-                d[i][j] = min(d[i - 1][j], d[i][j - 1], d[i - 1][j - 1]) + 1
-    return d[m][n]
-
-def check_frame_for_death(image):
+def check_frame_for_death(image, game_type):
     is_death = False
 
-    # Image crop coodinates
-    x=int(crop["x"])
-    y=int(crop["y"])
-    width=int(crop["width"])
-    height=int(crop["height"])
+    # start = time.time()
+    # __red color mask__
+    # __DARK SOULS 1, 2, 3__ __DEMONS SOULS REMAKE__ __SEKIRO SHADOW DIE TWICE__
+    # img_ori = cv2.cvtColor(np.array(ImageGrab.grab()), cv2.COLOR_BGRA2RGB)
+    img_ori = np.array(image)
+    original_image = img_ori
+    img_ori = cv2.resize(img_ori, dsize=(960, 540), interpolation=cv2.INTER_AREA)
+    img_hsv = cv2.cvtColor(img_ori, cv2.COLOR_BGR2HSV)
+    img_mask = cv2.inRange(img_hsv, lower_red1, upper_red1)
+    img_mask2 = cv2.inRange(img_hsv, lower_red2, upper_red2)
+    img_mask3 = img_mask + img_mask2
+    img_result = cv2.bitwise_and(img_ori, img_ori, mask=img_mask3)
+    contours, _ = cv2.findContours(img_mask3, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Crop the image
-    image = image[y:y+height, x:x+width]
+    if debug_mode:
+        cv2.imwrite("debug_images/img_ori.png", img_result)
+        cv2.imwrite("debug_images/img_hsv.png", img_result)
+        cv2.imwrite("debug_images/img_mask.png", img_result)
+        cv2.imwrite("debug_images/img_mask2.png", img_result)
+        cv2.imwrite("debug_images/img_mask3.png", img_result)
+        cv2.imwrite("debug_images/img_result.png", img_result)
+        
+    height, width, channels = img_ori.shape
+    w_rate = width / 1920
+    h_rate = height / 1080
+    # Square box
+    fX = []
+    D = []
+    contour_array = []
+    blue_box = []
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)  # Create a vertical rectangle
+        if game_type == "souls" \
+                and 70 * h_rate < h < 140 * h_rate \
+                and 10 * w_rate < w < 110 * w_rate:
+            contour_array.append([x, y, w, h])
+        elif game_type == "sekiro" and 200 < h < 350 and 50 < w < 350:
+            contour_array.append([x, y, w, h])
+        elif game_type == "ring" and 50 * h_rate < h < 80 * h_rate and 10 * w_rate < w < 80 * w_rate:
+            contour_array.append([x, y, w, h])
+        # __ sort countours
+    for i in range(len(contour_array) - 1):
+        index = i
+        for j in range(i + 1, len(contour_array)):
+            # print(centers[j])
+            if contour_array[index][0] > contour_array[j][0]:
+                index = j
+        contour_array[i], contour_array[index] = contour_array[index], contour_array[i]
+    # __ y position average
+    contour_y_sum = 0
+    avg = 0
+    if game_type == "souls" or game_type == "ring":
+        delete_array = []
+        for i in range(len(contour_array)):
+            contour_y_sum = contour_y_sum + contour_array[i][1]
+        try:
+            avg = int(contour_y_sum / len(contour_array))
+        except ZeroDivisionError:
+            avg = 0
+        # print("avg : ", avg)
+        for i in range(len(contour_array)):
+            # __ contour_array[i][1] : contours y position
+            sub = avg - contour_array[i][1]
+            if sub < 0: # sub = int(np.sqrt(sub * sub))
+                sub *= -1
+            if sub > 80 * h_rate:
+                delete_array.append(i)
+        for i in reversed(delete_array):
+            del contour_array[i]
+        delete_array.clear()
 
-    # Debug Info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/cropped.png", image)
-
-    # Color the image
-    image = cv2.cvtColor(np.array(image),cv2.COLOR_BGR2HSV_FULL)
-
-    # Debug info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/cropped_colored.png", image)
-
-    firstMaskFetched = False;
-
-    ## TODO: Optimize fetching of values so that it isnt executed every time
-    for element in mask_file:
-        lower = np.array(element["lower"])
-        pixelvalue = np.array(element["pixel"])
-        upper = np.array(element["upper"])
-        mask_lower = cv2.inRange(image, lower, pixelvalue)
-        mask_upper = cv2.inRange(image, pixelvalue, upper)
-        if firstMaskFetched:
-            mask = mask + mask_lower + mask_upper
-        else:
-            mask = mask_lower + mask_upper
-            firstMaskFetched = True;
-
-    output_img = image.copy()
-    output_img[np.where(mask==0)] = 0
-
-    image = output_img
-
-    # Debug Info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/mask.png", image)
-
-    # Turn image grayscale
-    image = cv2.cvtColor(np.array(image),cv2.COLOR_BGR2GRAY)
-
-    # Debug Info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/image_grayscale.png", image)
-
-    # TODO: Improve image processing? Probably not perfect?
-    # Black and White processing
-    image = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
-    #Apply dilation and erosion to remove noise
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
-    image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, iterations=3)
-    image = cv2.GaussianBlur(image, (5,5), 0)
-
-    # Read text from image
-    imgtext = pytesseract.image_to_string(image, lang=language, config='--psm 11 --oem 3 -c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ -c tessedit_pageseg_mode=1 -c tessedit_min_word_length=2')
-
-    # get levenshtein distance of complete cropped image
-    ldistance = levenshtein(imgtext, ocr_string)
-
-    # Get the shape of the image
-    blackheight, blackwidth = np.shape(image)
-
-    # Create a black image with the same shape as the input image
-    black_image = np.zeros((blackheight, blackwidth, 3), dtype=np.uint8)
-    black_image = cv2.cvtColor(np.array(black_image),cv2.COLOR_BGR2GRAY)
-
-    # The following process generates 2 new images
-    # One where the right halft is filled with black pixels and one where the left half is filled with black pixels
-    # Overall this can help the OCR Algorithm as the simplifed images have less noise
-
-    # Copy the image so that the right half can be filled with black pixels
-    imageBlackR = image.copy()
-
-    # Fill the left half of the image with black pixels
-    imageBlackR[:, :width//2] = black_image[:, :width//2]
-
-    # Debug Info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/imageBlackR.png", imageBlackR)
-
-    # Copy the image so that the left half can be filled with black pixels
-    imageBlackL = image.copy()
-
-    # Fill the right half of the image with black pixels
-    imageBlackL[:, width//2:] = black_image[:, width//2:]
-
-    # Debug Info
-    if(debug_mode == "enabled"):
-        cv2.imwrite("debugImages/images/imageBlackL.png", imageBlackL)
-
-    # Pass both processed simplified images to the OCR Algorithm
-    righthalftext = pytesseract.image_to_string(imageBlackR, lang=language, config='--psm 11 --oem 3 -c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ -c tessedit_pageseg_mode=1 -c tessedit_min_word_length=2')
-    lefthalftext = pytesseract.image_to_string(imageBlackL, lang=language, config='--psm 11 --oem 3 -c tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ -c tessedit_pageseg_mode=1 -c tessedit_min_word_length=2')
-
-    # Get the levensthein distance of the recognized text
-    right_ldistance = levenshtein(righthalftext, ocr_string)
-    left_ldistance = levenshtein(lefthalftext, ocr_string)
-
-    # Choose the smallest levensthein distance as the true levenshtein distance / Choose the closest match
-    ldistance = min(ldistance, right_ldistance, left_ldistance)
-
-    # Debug Info
-    if(debug_mode == "enabled"):
-        print("Detected: " + lefthalftext + "|" + imgtext + "|" + righthalftext)
-        print("ldistance: " + str(ldistance))
-
-    # Check for acceptable levenshtein distance
-    if ldistance >= levenshtein_d:
-        # Debug Info
-        if(debug_mode == "enabled"):
-            print("No valid text found")
-            cv2.imwrite("debugImages/images/unsuccessfull.png", image)
-
-    elif ldistance < levenshtein_d:
-        # Debug Info
-        if(debug_mode == "enabled"):
-            print("Valid Text found: " + lefthalftext + "|" + imgtext + "|" + righthalftext)
-
+    contour_y_sum = 0
+    for i in range(len(contour_array)):
+        contour_y_sum = contour_y_sum + contour_array[i][1]
+    try:
+        avg = int(contour_y_sum / len(contour_array))
+    except ZeroDivisionError:
+        avg = 0
+    # print("len contour_array : ", len(contour_array))
+    # print("contour_array : ", contour_array)
+    for i in range(len(contour_array)):
+        # print("i : ", i)
+        # __ (average - contour_y position) < 50 ? bluebox.append : next
+        sub = avg - contour_array[i][1]
+        if sub < 0: # sub = int(np.sqrt(sub * sub))
+            sub *= -1
+        if sub < 50 * h_rate:
+            blue_box.append(contour_array[i])
+            # __debug : check bounding box
+            # cv2.rectangle(
+            #     img_result,
+            #     (contour_array[i][0], contour_array[i][1]),
+            #     (contour_array[i][0] + contour_array[i][2], contour_array[i][1] + contour_array[i][3]),
+            #     (255, 0, 0), 2)
+        # ### Find the distance [D] between contours & the vertical ratio of the contours must be constant.
+    if len(blue_box) >= 2:  # ##if len(centers) >= 2: if len(contour_array) >= 2:
+        for idx in range(len(blue_box) - 1):
+            dx = blue_box[idx][0] - blue_box[idx + 1][0]
+            dy = blue_box[idx][1] - blue_box[idx + 1][1]
+            D.append(int(np.sqrt(dx * dx + dy * dy)))
+    # print("D : ", D)
+    for i in range(len(D)):
+        if game_type == "souls" and D[i] < 160 * w_rate: # __ souls
+            fX.append(D[i])
+        elif game_type == "sekiro" and 160 < D[i] < 165: # __ sekiro
+            fX.append(D[i])
+        elif game_type == "ring" and D[i] < 50 * w_rate * 2:
+            fX.append(D[i])
+    # print(fX)
+    if game_type == "souls" and 5 < len(fX) < 9: # __ souls
         is_death = True
+    elif game_type == "sekiro" and len(fX) == 1: # __ sekiro
+        is_death = True
+    elif game_type == "ring" and 5 < len(fX) < 9: # __ elden ring
+        is_death = True
+    contour_array.clear()
+    blue_box.clear()
+    D.clear()
+    fX.clear()
+    # print("FPS : {:.2f}".format(1 / (time.time() - start)))
 
-        # Debug Info
-        if(debug_mode == "enabled"):
-             cv2.imwrite("debugImages/images/successfull.png", image)
+    # __OCR test__
+    # text_img = pytesseract.image_to_string(img_result, lang='eng')
+    # print(text_img)
+    # __debug only__
+    # img_resize = cv2.resize(img_result, dsize=(0, 0), fx=0.5, fy=0.5)
+    # cv2.imshow("capture", img_resize)
+    # cv2.waitKey(1)
+    # if key == 0:
+    #     cv2.destroyAllWindows()
+    #     break
 
     return is_death
 
 def add_death(timestamp):
     print(f'Death at {timestamp}')
 
-def process(target_video_file):
+def process(target_video_file, game_type):
     video = cv2.VideoCapture(target_video_file)
     video_fps = video.get(cv2.CAP_PROP_FPS)
     next_needed_frame_no = 0
@@ -198,7 +175,7 @@ def process(target_video_file):
             
         if (next_needed_frame_no == current_frame_no):
             status, frame = video.retrieve()
-            is_death = check_frame_for_death(frame)
+            is_death = check_frame_for_death(frame, game_type)
             if is_death:
                 add_death(str(video.get(cv2.CAP_PROP_POS_MSEC)))
                 next_needed_frame_no = current_frame_no + refresh_time_death*video_fps
@@ -213,4 +190,4 @@ def process(target_video_file):
 
     video.release()
 
-process('toprocess.webm')
+process('toprocess.webm', 'ring')
