@@ -1,11 +1,5 @@
 {
-    "tesseract_directory": "C:\\Program Files\\Tesseract-OCR",
     "refresh_time": "0.2",
     "refresh_time_death": "15",
-    "debug_mode": "false",
-    "crop_file":"crop.json",
-    "mask_file":"mask.json",
-    "ocr_string": "YOUDIED",
-    "language": "eng",
-    "levensthein_d": "6"
+    "debug_mode": "false"
 }

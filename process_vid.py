@@ -197,5 +197,3 @@ def process(target_video_file, game_type):
             print(f'Processing at {round(fps, 2)} frames per seconds. \nTime remaining : {round(((video_total_frames - current_frame_no) / fps), 2)} seconds')
 
     video.release()
-
-#process('toprocess.webm', 'ring')
