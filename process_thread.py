@@ -1,27 +1,89 @@
 import cv2
 import numpy as np
-import json
-import os
 import time
+import threading
+import yt_dlp
+
+class ProcessThread(threading.Thread):
+    def __init__(self, url, game, debug_option, milliseconds_skipped, seconds_skipped_after_death):
+        self.progress_status = ""
+        self.phase = "Initializing"
+        self.youtube_url = url
+        self.game = game
+        self.debug = debug_option
+        self.video_location = ""
+        self.milliseconds_skipped = milliseconds_skipped
+        self.seconds_skipped_after_death = seconds_skipped_after_death
+        self.death_timestamps = ""
+        super().__init__()
+    
+    def run(self):
+        #self.download_yt()
+        #self.process_vid()
+        for f in range(100):
+            time.sleep(1)
+            self.progress_status = f'Phase : {self.phase}\nPercent done : {f}'
+    
+    def download_yt(self):
+        ydl_opts = {'format': 'bestvideo',
+                    'quiet': 'true',
+                    'outtmpl': 'toprocess.%(ext)s'}
+        ydl = yt_dlp.YoutubeDL(ydl_opts)
+        info_dict = ydl.extract_info(self.youtube_url, download=False)
+        video_title = info_dict.get('title', None)
+        print(f'Downloading video : {video_title}')
+        ydl.download(self.youtube_url)
+    
+    def add_death(self, timestamp):
+        new_death = f'Death at {timestamp}\n'
+        self.death_timestamps = f'{self.death_timestamps}{new_death}'
+    
+    def process(self):
+        video = cv2.VideoCapture(self.video_location)
+        video_fps = video.get(cv2.CAP_PROP_FPS)
+        video_total_frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
+        next_needed_frame_no = 0
+        current_frame_no = 0
+        start_time = time.time()
+
+        while video.isOpened():
+            is_death = False
+            ret = video.grab()
+            if not ret:
+                #Video has ended
+                break
+                
+            if (next_needed_frame_no == current_frame_no):
+                status, frame = video.retrieve()
+                is_death = check_frame_for_death(frame, self.game)
+                if is_death:
+                    self.add_death(str(video.get(cv2.CAP_PROP_POS_MSEC)))
+                    next_needed_frame_no = current_frame_no + self.refresh_time_death*video_fps
+                else:
+                    next_needed_frame_no = current_frame_no + self.refresh_time*video_fps
+            else:
+                current_frame_no+=1
+            
+            if cv2.waitKey(10) & 0XFF == ord('q'):
+                break
+            
+            if (current_frame_no % 30 == 0):
+                fps = current_frame_no/(time.time() - start_time)
+                if fps == 0:
+                    fps = 1
+                print(f'Processing at {round(fps, 2)} frames per seconds. \nTime remaining : {round(((video_total_frames - current_frame_no) / fps), 2)} seconds')
+        video.release()
+
 
 #https://stackoverflow.com/questions/66993242/make-faster-videocapture-opencv
 #https://github.com/Jan-9C/deathcounter_ocr/blob/main/deathcounter.py
-
-#Fetch configs
-with open('config.json', 'r') as f:
-    config = json.load(f)
-
-debug_mode = (str.lower(config['debug_mode']) == "true") or (str.lower(config['debug_mode']) == "enabled")
-
-refresh_time = float(config['refresh_time'])
-refresh_time_death = float(config['refresh_time_death'])
 
 lower_red1 = (0, 67, 80)
 upper_red1 = (5, 255, 255)
 lower_red2 = (170, 67, 80)
 upper_red2 = (180, 255, 255)
 
-def check_frame_for_death(image, game_type):
+def check_frame_for_death(image, game_type, debug_mode):
     is_death = False
 
     if debug_mode:
@@ -157,43 +219,3 @@ def check_frame_for_death(image, game_type):
         print(f'Processing : {round(1 / (time.time() - start), 2)} frames per seconds')
 
     return is_death
-
-def add_death(timestamp):
-    print(f'-------------Death at {timestamp}-------------')
-
-def process(target_video_file, game_type):
-    video = cv2.VideoCapture(target_video_file)
-    video_fps = video.get(cv2.CAP_PROP_FPS)
-    video_total_frames = video.get(cv2.CAP_PROP_FRAME_COUNT)
-    next_needed_frame_no = 0
-    current_frame_no = 0
-    start_time = time.time()
-
-    while video.isOpened():
-        is_death = False
-        ret = video.grab()
-        if not ret:
-            #Video has ended
-            break
-            
-        if (next_needed_frame_no == current_frame_no):
-            status, frame = video.retrieve()
-            is_death = check_frame_for_death(frame, game_type)
-            if is_death:
-                add_death(str(video.get(cv2.CAP_PROP_POS_MSEC)))
-                next_needed_frame_no = current_frame_no + refresh_time_death*video_fps
-            else:
-                next_needed_frame_no = current_frame_no + refresh_time*video_fps
-        else:
-            current_frame_no+=1
-        
-        if cv2.waitKey(10) & 0XFF == ord('q'):
-            break
-        
-        if (current_frame_no % 30 == 0):
-            fps = current_frame_no/(time.time() - start_time)
-            if fps == 0:
-                fps = 1
-            print(f'Processing at {round(fps, 2)} frames per seconds. \nTime remaining : {round(((video_total_frames - current_frame_no) / fps), 2)} seconds')
-
-    video.release()

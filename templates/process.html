@@ -1,0 +1,21 @@
+<!doctype html>
+<title>Death Counter - Processing</title>
+Processing...<br><br>
+<button type="button" onclick="stopUpdating()" class="btn btn-danger">Stop updating</button>
+<br><br>
+<input type="text" id="status" name="status" disabled size="100">
+
+<script>
+    function updateStatus() {
+        fetch("http://127.0.0.1:5000/check_progress/{{thread_id}}")
+        .then(response => response.json())
+        .then((responseData) => {
+            console.log(responseData)
+            document.getElementById("status").value = responseData
+        })
+    }
+    var t=window.setInterval(updateStatus(),2000);
+    function stopUpdating(){
+        clearInterval(t)
+    }
+</script>

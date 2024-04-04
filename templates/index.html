@@ -1,0 +1,37 @@
+<!doctype html>
+<title>Death Counter</title>
+
+<form action="" method="post">
+    <table>
+        {{ form.hidden_tag() }}
+        <tr>
+            <td>{{ form.youtube_url.label }}</td>
+            <td>{{ form.youtube_url(size=45) }}</td>
+        </tr>
+        <tr>
+            <td>{{ form.game.label }}</td>
+            <td>{{ form.game }}</td>
+        </tr>
+        <tr>
+            <td>&nbsp;</td>
+            <td>&nbsp;</td>
+        </tr>
+        <tr>
+            <td><u>Advanced options</u></td>
+            <td>&nbsp;</td>
+        </tr>
+        <tr>
+            <td>{{ form.debug.label }}</td>
+            <td>{{ form.debug }}</td>
+        </tr>
+        <tr>
+            <td>{{ form.milliseconds_skipped.label }}</td>
+            <td>{{ form.milliseconds_skipped }}</td>
+        </tr>
+        <tr>
+            <td>{{ form.seconds_skipped_after_death.label }}</td>
+            <td>{{ form.seconds_skipped_after_death }}</td>
+        </tr>
+    </table>
+    <p>{{ form.submit() }}</p>
+</form>
